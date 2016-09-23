@@ -97,7 +97,7 @@ namespace NVNC
         protected BinaryReader reader;	// Integral rather than Byte values are typically
         protected BinaryWriter writer;	// sent and received, so these handle this.
         protected ZlibCompressedWriter zlibWriter; //The Zlib Stream Writer used for Zlib and ZRLE encodings
-        
+
         public bool isRunning;
 
         //Port property
@@ -265,11 +265,26 @@ namespace NVNC
                 }
                 else
                 {
+                    if (b.Length < 11)
+                        Array.Resize<byte>(ref b, 11);
+
+                    Console.WriteLine(string.Format("Version={0} {1} {2} {3} {4} {5} {6} {7} {8} {9}"
+                                                           , b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9]));
+                    Console.Write(string.Format("\n10: {0} {1}"
+                                                   , b[10], b[11]));
+
+                    //  b[0] == 0x52 &&					// R
+                    //    R B _ 0 0 3 .
+                    //  or2 : 0..   &&				// BUG FIX: Apple reports 8 
+                    // or3: 0x38) &&				// BUG FIX: Apple reports 8 
+                    // or 4:  x33 ||				// 3, 7, OR 8 are all valid and possible
+
                     throw new NotSupportedException("Only versions 3.3, 3.7, and 3.8 of the RFB Protocol are supported.");
                 }
             }
             catch (IOException ex)
             {
+                Console.WriteLine(string.Format("Blocking {0} {1}", this.serverSocket.Server.Blocking, this.serverSocket.Server.ToString()));
                 Console.WriteLine(ex.Message);
                 Close();
             }
@@ -282,6 +297,8 @@ namespace NVNC
         {
             try
             {
+                Console.WriteLine(string.Format("Version is {0}.{1}", verMajor.ToString(), verMinor.ToString()));
+
                 // We will use which ever version the server understands, be it 3.3, 3.7, or 3.8.
                 Debug.Assert(verMinor == 3 || verMinor == 7 || verMinor == 8, "Wrong Protocol Version!",
                              string.Format("Protocol Version should be 3.3, 3.7, or 3.8 but is {0}.{1}", verMajor.ToString(), verMinor.ToString()));
@@ -345,6 +362,8 @@ namespace NVNC
         /// <returns>Returns a boolean value representing successful authentication or not.</returns>
         public bool WriteAuthentication(string password)
         {
+            Exception lastError = null;
+
             // Indicate to the client which type of authentication will be used.
             //The type of Authentication to be used, 1 (None) or 2 (VNC Authentication).
             if (String.IsNullOrEmpty(password))
@@ -375,13 +394,32 @@ namespace NVNC
             else
             {
                 byte[] types = { 2 };
-                writer.Write((byte)types.Length);
+                try
+                {
+                    writer.Write((byte)types.Length);
 
-                for (int i = 0; i < types.Length; i++)
-                    writer.Write(types[i]);
+                    for (int i = 0; i < types.Length; i++)
+                        writer.Write(types[i]);
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                    // An existing connection was forcibly closed by the remote host, Check ErrorCode 
+                    Console.WriteLine(ex.Message);
+                    if (ex.InnerException != null)
+                        Console.WriteLine(ex.InnerException.Message);
+                }
             }
-            if (verMinor >= 7)
-                reader.ReadByte();
+
+            lastError = null;
+            try
+            {
+                if (verMinor >= 7)
+                    reader.ReadByte();
+            }
+            catch (Exception ex) { lastError = ex; }
+            if (lastError != null)
+                return false;
 
             //A random 16 byte challenge
             byte[] bChallenge = new byte[16];
@@ -389,8 +427,19 @@ namespace NVNC
             rand.NextBytes(bChallenge);
 
             // send the bytes to the client and wait for the response
-            writer.Write(bChallenge);
-            writer.Flush();
+            try
+            {
+                writer.Write(bChallenge);
+                writer.Flush();
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                // An existing connection was forcibly closed by the remote host, Check ErrorCode 
+                Console.WriteLine(ex.Message);
+                if (ex.InnerException != null)
+                    Console.WriteLine(ex.InnerException.Message);
+            }
 
             byte[] receivedBytes = reader.ReadBytes(16);
             byte[] key = PasswordToKey(password);
@@ -416,11 +465,13 @@ namespace NVNC
                 WriteSecurityResult(0);
                 return true;
             }
+
             WriteSecurityResult(1);
             if (verMinor != 8) return false;
             string ErrorMsg = "Wrong password, sorry";
             WriteUint32((uint)ErrorMsg.Length);
             writer.Write(GetBytes(ErrorMsg));
+
             return false;
         }
 
@@ -583,9 +634,9 @@ namespace NVNC
             {
                 Stopwatch tip = Stopwatch.StartNew();
                 EncodedRectangleFactory factory = new EncodedRectangleFactory(this, fb);
-             
+
                 ICollection<QuadNode> list = screenHandler.GetChange();
-                
+
                 Trace.WriteLine(list.Count + " rectangles to encode");
                 foreach (QuadNode iter in list)
                 {

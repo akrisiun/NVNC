@@ -48,8 +48,8 @@ namespace NVNC.Utils
         {
             public int key;
             public bool isShift;
-            public bool isAlt;
-            public bool isCtrl;
+            public bool isAlt = false;
+            public bool isCtrl = false;
         }
         private static int mouseModifiers = 0;
         private static bool shift = false;

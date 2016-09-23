@@ -18,6 +18,7 @@
 using System;
 using System.Drawing;
 using NVNC.Utils;
+using System.Diagnostics;
 
 namespace NVNC
 {
@@ -69,9 +70,8 @@ namespace NVNC
             };
         }
 
-        public void Start()
+        public virtual void Start()
         {
-
             if (String.IsNullOrEmpty(Name))
                 throw new ArgumentNullException("Name", "The VNC Server Name cannot be empty.");
             if (Port == 0)
@@ -90,10 +90,20 @@ namespace NVNC
             if (!host.WriteAuthentication(Password))
             {
                 Console.WriteLine("Authentication failed !");
-                host.Close();
+#if DEBUG                
                 //Start();
+                if (!Debugger.IsAttached)
+                {
+                    host.Close();
+                    return;
+                }
+#else 
+                host.Close();
+                return;
+#endif
             }
-            else
+            
+            // else
             {
                 Console.WriteLine("Authentication successfull !");
 
@@ -102,6 +112,12 @@ namespace NVNC
 
                 Console.WriteLine("Server name: " + fb.DesktopName);
                 host.WriteServerInit(fb);
+
+                if (!host.isRunning)
+                {
+                    Console.WriteLine("host.isRunning = false");
+                    return;
+                }
 
                 while ((host.isRunning))
                 {

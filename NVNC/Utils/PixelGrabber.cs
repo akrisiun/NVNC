@@ -401,6 +401,7 @@ namespace NVNC.Utils
             img.UnlockBits(bmp);
             return array;
         }
+        
         public static int[] CopyPixels(int[] pixels, int scanline, int x, int y, int w, int h)
         {
             int size = w * h;
@@ -415,6 +416,8 @@ namespace NVNC.Utils
                 {
                     s = 0;
                     p += jump;
+                    if (p >= pixels.Length)
+                        break;
                 }
                 ourPixels[i] = pixels[p];
             }

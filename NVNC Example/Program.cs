@@ -2,14 +2,24 @@
 using System.Collections.Generic;
 using System.Text;
 using NVNC;
+using System.Diagnostics;
 
 namespace VNCTest
 {
-    class Program
+    public class Program
     {
-        static void Main(string[] args)
+        public static void Main(string[] args)
         {
-            VncServer s = new VncServer("T!T@N", 5900, "T!T@N-VNC");
+#if DEBUG
+            Console.WriteLine("Vnc debug?");
+            Console.ReadKey();
+            if (Debugger.IsAttached)
+                Debugger.Launch();
+
+#endif
+
+            // T!T@N VncServer("T!T@N", 5900, "T!T@N-VNC");
+            var s = new VncServerTest("123", 5900, "admin");
             try
             {
                 s.Start();
@@ -20,6 +30,23 @@ namespace VNCTest
                 return;
             }
             Console.ReadLine();
+        }
+    }
+
+    public class VncServerTest : VncServer
+    {
+        public VncServerTest(string password, int port, string name)
+            : base(password, port, name)
+        {
+
+        }
+
+        public override void Start()
+        {
+            if (Debugger.IsAttached)
+                Debugger.Break();
+
+            base.Start();
         }
     }
 }
