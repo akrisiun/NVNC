@@ -31,6 +31,7 @@ using NVNC.Readers;
 using NVNC.Writers;
 using NVNC.Utils;
 using NVNC.Utils.ScreenTree;
+using System.Threading;
 
 namespace NVNC
 {
@@ -39,6 +40,8 @@ namespace NVNC
     /// </summary>
     public class VncHost
     {
+        #region Properties
+
         /// <summary>
         /// RFB Encoding constants.
         /// </summary>
@@ -71,6 +74,7 @@ namespace NVNC
         /// </summary>
         public enum ClientMessages : byte
         {
+            Error = 0xFF,
             SetPixelFormat = 0,
             ReadColorMapEntries = 1,
             SetEncodings = 2,
@@ -138,15 +142,16 @@ namespace NVNC
             return prefEnc;
         }
 
+        #endregion
 
         public VncHost(int port, string displayname, ScreenHandler sc)
         {
             Port = port;
             DisplayName = displayname;
             screenHandler = sc;
-            Start();
-
         }
+
+        public VncServer Server { get; set; }
 
         /// <summary>
         /// Gets the Protocol Version of the remote VNC Host--probably 3.3, 3.7, or 3.8.
@@ -171,9 +176,11 @@ namespace NVNC
         /// <summary>
         /// The main server loop. Listening on the selected port occurs here, and accepting incoming connections
         /// </summary>
-        public void Start()
+        public void Start(VncServer server)
         {
+            this.Server = server;
             isRunning = true;
+
             try
             {
                 serverSocket = new TcpListener(IPAddress.Any, Port);
@@ -187,6 +194,7 @@ namespace NVNC
                 //Close();
                 return;
             }
+
             try
             {
                 //SocketError error = SocketError.AccessDenied;
@@ -198,6 +206,7 @@ namespace NVNC
                 Console.WriteLine(localIP);
 
                 stream = new NetworkStream(localClient, true);
+
                 reader = new BigEndianBinaryReader(stream);
                 writer = new BigEndianBinaryWriter(stream);
                 zlibWriter = new ZlibCompressedWriter(stream);
@@ -454,11 +463,15 @@ namespace NVNC
             /*
                 Console.WriteLine("Us: " + System.Text.Encoding.ASCII.GetString(ourBytes));
                 Console.WriteLine("Client sent us: " + System.Text.Encoding.ASCII.GetString(receivedBytes));
-                */
+            */
             bool authOK = true;
             for (int i = 0; i < ourBytes.Length; i++)
+            {
+                if (receivedBytes.Length <= i)
+                    break;
                 if (receivedBytes[i] != ourBytes[i])
                     authOK = false;
+            }
 
             if (authOK)
             {
@@ -468,9 +481,14 @@ namespace NVNC
 
             WriteSecurityResult(1);
             if (verMinor != 8) return false;
+
             string ErrorMsg = "Wrong password, sorry";
             WriteUint32((uint)ErrorMsg.Length);
             writer.Write(GetBytes(ErrorMsg));
+#if  DEBUG
+            if (Debugger.IsAttached)
+                return true;
+#endif
 
             return false;
         }
@@ -499,6 +517,9 @@ namespace NVNC
             }
             catch (IOException ex)
             {
+                this.Server.LastError = ex;
+
+                Console.WriteLine("ReadClientInit failure");
                 Console.WriteLine(ex.Message);
                 Close();
             }
@@ -517,12 +538,16 @@ namespace NVNC
                 writer.Write(Convert.ToUInt16(fb.Height));
                 writer.Write(fb.ToPixelFormat());
 
-                writer.Write(Convert.ToUInt32(fb.DesktopName.Length));
-                writer.Write(GetBytes(fb.DesktopName));
+                string desktopName = fb.DesktopName ?? Environment.MachineName; // = "admin";
+                writer.Write(Convert.ToUInt32(desktopName.Length));
+                writer.Write(GetBytes(desktopName));
                 writer.Flush();
             }
             catch (IOException ex)
             {
+                this.Server.LastError = ex;
+
+                Console.WriteLine("WriteServerInit failed");
                 Console.WriteLine(ex.Message);
                 Close();
 
@@ -668,9 +693,20 @@ namespace NVNC
             Stopwatch Watch = Stopwatch.StartNew();
             try
             {
+                var prop = writer.GetType().GetProperty("OutStream");
+                // { System.Net.Sockets.NetworkStream}
+                var stream = prop == null ? null : prop.GetValue(writer, null) as NetworkStream;
+                if (stream != null)
+                    Console.WriteLine(stream.ToString());
+
                 WriteServerMessageType(ServerMessages.FramebufferUpdate);
+
+                Console.WriteLine("Writing padding?");
+
                 WritePadding(1);
                 writer.Write(Convert.ToUInt16(rectangles.Count));
+
+                Console.WriteLine("Writing padding success, rectanges {0}", rectangles.Count);
 
                 foreach (EncodedRectangle e in rectangles)
                     e.WriteData();
@@ -769,8 +805,11 @@ namespace NVNC
             }
             catch (IOException ex)
             {
-                Console.WriteLine(ex.Message);
-                Close();
+                Console.WriteLine("ReadServerMessageType failed {0} ", ex.Message);
+
+                Thread.Sleep(100);
+                return ClientMessages.Error;
+                // Close();
             }
             return (ClientMessages)x;
         }

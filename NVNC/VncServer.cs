@@ -25,14 +25,15 @@ namespace NVNC
     /// <summary>
     /// A wrapper class that should be used. It represents a VNC Server, and handles all the RFB procedures and communication.
     /// </summary>
-    public class VncServer
+    public class VncServer : ILastError
     {
-        private VncHost host;
-        private Framebuffer fb;
+        public Exception LastError { get; set; }
 
-        
         public int Port { get; private set; }
         public string Password { get; private set; }
+
+        private VncHost host;
+        private Framebuffer fb;
 
         /// <summary>
         /// The VNC Server name.
@@ -54,6 +55,13 @@ namespace NVNC
             Name = name;
 
             Size screenSize = ScreenSize();
+#if DEBUG
+            if (screenSize.Width > 1605)
+                screenSize = new Size(1605, 920);
+
+
+            Console.WriteLine("Screen size {0}", screenSize.ToString());
+#endif
             fb = new Framebuffer(screenSize.Width, screenSize.Height)
             {
                 BitsPerPixel = 32,
@@ -66,7 +74,7 @@ namespace NVNC
                 BlueMax = 0xFF,
                 GreenMax = 0xFF,
                 RedMax = 0xFF,
-                DesktopName = name
+                DesktopName = name ?? "NVNC"
             };
         }
 
@@ -79,7 +87,9 @@ namespace NVNC
             Console.WriteLine("Started VNC Server at port: " + Port);
 
             host = new VncHost(Port, Name, new ScreenHandler(new Rectangle(0, 0, ScreenSize().Width, ScreenSize().Height), true));
-            
+            host.Start(this);
+
+
             host.WriteProtocolVersion();
             Console.WriteLine("Wrote Protocol Version");
 
@@ -102,7 +112,7 @@ namespace NVNC
                 return;
 #endif
             }
-            
+
             // else
             {
                 Console.WriteLine("Authentication successfull !");
@@ -123,6 +133,9 @@ namespace NVNC
                 {
                     switch (host.ReadServerMessageType())
                     {
+                        case VncHost.ClientMessages.Error:
+                            break;
+
                         case VncHost.ClientMessages.SetPixelFormat:
                             Console.WriteLine("Read SetPixelFormat");
                             Framebuffer f = host.ReadSetPixelFormat(fb.Width, fb.Height);
@@ -142,7 +155,7 @@ namespace NVNC
                             host.ReadFrameBufferUpdateRequest(fb);
                             break;
                         case VncHost.ClientMessages.KeyEvent:
-                            Console.WriteLine("Read KeyEvent");      
+                            Console.WriteLine("Read KeyEvent");
                             host.ReadKeyEvent();
                             break;
                         case VncHost.ClientMessages.PointerEvent:
@@ -156,7 +169,7 @@ namespace NVNC
                     }
                 }
                 //if (!host.isRunning)
-                    //Start();
+                //Start();
             }
         }
         /// <summary>
